@@ -1,0 +1,6 @@
+build
+si
+build.sh
+sdkconfig
+*.old
+*.ci
