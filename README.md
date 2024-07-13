@@ -3,11 +3,9 @@
 
 ## **1. 简介**
 
-中移铁通智能插座 (型号: CMPOWER W1) 基于乐鑫 **ESP8266 WiFi** 芯片设计。由于早已没有官方 APP 支持，于是重新开发一版固件适配该硬件基本功能。
+不同于 **main** 分支，当前分支主要是为了对接 **Home Assistant** 来控制中移铁通智能插座。
 
-固件基于乐鑫 **ESP8266_RTOS_SDK** 开发，通信协议采用 **MQTT-TCP** 方式控制插座的两个继电器。其中 **MQTT Broker** 可以根据实际情况自定义，默认使用: `broker.emqx.io`。配合例如: **MyMQTT APP** 可以实现远程控制插座的主继电器和子继电器。
-
-*你也可以基于此固件对接私有的 MQTT broker*
+固件基于乐鑫 **ESP8266_RTOS_SDK** 开发，通信协议采用 **MQTT-TCP** 方式控制插座的两个继电器。其中 **MQTT Broker** 使用 **Home Assistant** 中 **Mosquitto Broker**，从而利用 **Home Assistant** 控制主继电器和子继电器。
 
 ## **2. 配网 APP**
 
@@ -21,41 +19,65 @@
 
 ##### **关于自定义数据说明**
 
-由于使用 Public broker，因此有可能出现不稳定情况，为了便于更换 broker 通过自定义数据方式传给设备。除此之外，为了避免所有设备都订阅相同的主题，用户可以自定义主题的一部分，从而避免设备被其他人控制(*如果大家使用相同 broker，订阅相同主题*)，自定义字符串也是通过自定义数据方式传给设备，因此，自定义数据格式如下:
+由于对接 **Home Assistant**，Broker IP 通过自定义数据方式传给设备。除此之外，为了避免多个插排情况下都订阅相同的主题，用户可以自定义主题的一部分。除此之外，mqtt 用户名和密码也需要传入，因此，自定义数据格式如下:
 
-`"broker url":"user string"`
+`"broker ip":"user string":"mqtt username":"mqtt password"`
 
-使用 `:` 分隔，如果自定义数据缺省，则默认使用:
-
-`broker.emqx.io:Slaven`
-
-当然也可以缺省部分，比如缺省 `broker`:
-
-`:Slaven`
-
-或者缺省 `user string`:
-
-`broker.emqx.io:`
+使用 `:` 分隔，不能缺省否则 Broker 连接失败:
 
 ![](./docs/esptouch.android.jpg)
 
-*图片以自定义 broker: broker.hivemq.com，自定义 user string: Demo 为例说明*
+*图片以 broker ip: 192.168.10.163，自定义 user string: Slaven，username: mqtt，password: homemqtt 为例说明*
 
-## **3. 控制 APP**
+**由于自定义数据总长度不能超过 32 字节，因此 broker ip 只需填写后两位，前两位默认“192.168”**
 
-**MyMQTT** 之类都可，只要可以发布订阅主题。
+## **3. HA 中添加 MQTT 实体**
+
+`configuration.yaml` 文件中添加如下配置:
+
+	mqtt:
+	  switch:
+		- unique_id: main_relay
+		  name: "Main Relay"
+		  state_topic: "/Slaven/status"
+		  command_topic: "/Slaven/set"
+		  value_template: '{{ value_json.socket == "main" and value_json.onoff }}'
+		  payload_on: '{"socket":"main","onoff":"on"}'
+		  payload_off: '{"socket":"main","onoff":"off"}'
+		  state_on: "on"
+		  state_off: "off"
+		  qos: 0
+		  optimistic: false
+		  
+		- unique_id: sub_relay
+		  name: "Chl Relay"
+		  state_topic: "/Slaven/status"
+		  command_topic: "/Slaven/set"
+		  value_template: '{{ value_json.socket == "sub" and value_json.onoff }}'
+		  payload_on: '{"socket":"sub","onoff":"on"}'
+		  payload_off: '{"socket":"sub","onoff":"off"}'
+		  state_on: "on"
+		  state_off: "off"
+		  qos: 0
+		  optimistic: false
+
+![](./docs/mqtt.client.png)
+
+![](./docs/mqtt.client_1.png)
+
+![](./docs/mqtt.client_2.png)
 
 ## **4. 订阅主题**
 
 当前 MQTT 订阅的主题有三个，如下：
 
-| Topic                 | 设备端 | APP 端 |
+| Topic                 | 设备端 | HA 端 |
 | --------------------- | --- | ----- |
 | /"user string"/set    | 订阅方 | 发布方   |
 | /"user string"/get    | 订阅方 | 发布方   |
 | /"user string"/status | 发布方 | 订阅方   |
 
-其中 `user string` 由配网时候 EspTouch 自定义数据传入，如果缺省则使用默认主题:
+其中 `user string` 由配网时候 EspTouch 自定义数据传入，以刚才上图为例主题则是:
 
 `/Slaven/set`
 
@@ -63,11 +85,9 @@
 
 `/Slaven/status`
 
-如果自定义 `user string`，则主题根据自定义相应修改
+如果你定义为其它 `user string`，则主题根据自定义相应修改
 
-![](./docs/mqtt.client.jpg)
-
-*图片以默认主题为例说明*
+*configuration.yaml 文件也基于此修改对应主题*
 
 ## **5. 消息负载**
 
@@ -89,7 +109,7 @@
 
 - 对于 `/"user string"/status` 主题：
 
-设备收到 `/"user string"/set` 或 `/"user string"/get` 主题消息后，通过 `/"user string"/status` 主题将设备状态上报给 APP 端。
+设备收到 `/"user string"/set` 或 `/"user string"/get` 主题消息后，通过 `/"user string"/status` 主题将设备状态上报给 **Home Assistant**。
 
 ## **6. LED说明**
 
@@ -120,7 +140,6 @@
  - MQTT-TLS
  - 计量功能
  - 本地 OTA
- - 定制手机端 APP 
  
 # 第二部分
 

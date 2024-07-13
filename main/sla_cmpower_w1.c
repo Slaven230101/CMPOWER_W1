@@ -315,13 +315,17 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 
 static void mqtt_app_start(void)
 {
-    char mqtt_broker_url[65] = {0};
-
-    sla_get_mqtt_broker_url_and_user_topic(mqtt_broker_url, mqtt_user_topic);
+    char mqtt_broker_ip[16] = {0};
+    char mqtt_username[33] = {0};
+    char mqtt_password[33] = {0};
+    
+    sla_get_mqtt_broker_params(mqtt_broker_ip, mqtt_user_topic, mqtt_username, mqtt_password);
     _sla_prepare_topic(mqtt_user_topic);
     
     esp_mqtt_client_config_t mqtt_cfg = {
-        .uri = mqtt_broker_url,
+        .host = mqtt_broker_ip,
+        .username = mqtt_username,
+        .password = mqtt_password,
     };
 
     mqtt_client = esp_mqtt_client_init(&mqtt_cfg);

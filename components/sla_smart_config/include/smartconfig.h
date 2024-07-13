@@ -19,8 +19,10 @@ extern "C" {
 
 #include "esp_err.h"
 
-#define BROKER_URL_MAX_LEN  64
+#define BROKER_IP_MAX_LEN   15
 #define USER_TOPIC_MAX_LEN  32
+#define USERNAME_MAX_LEN    32
+#define PASSWORD_MAX_LEN    32
 
 typedef enum {
     SYS_EVENT_NONE,
@@ -42,7 +44,7 @@ int sla_is_wifi_connected(void);
 
 void sla_wifi_reset(void);
 
-void sla_get_mqtt_broker_url_and_user_topic(char *url, char *user_topic);
+void sla_get_mqtt_broker_params(char *ip, char *user_topic, char *username, char *password);
 
 #ifdef __cplusplus
 }
