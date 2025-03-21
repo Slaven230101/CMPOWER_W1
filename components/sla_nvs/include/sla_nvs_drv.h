@@ -21,9 +21,13 @@ extern "C" {
 
 esp_err_t sla_nvs_init(void);
 
-esp_err_t sla_nvs_read(const char *key, char *data, int *p_len);
+esp_err_t sla_nvs_str_read(const char *key, char *data, int *p_len);
 
-esp_err_t sla_nvs_write(const char *key, char *data);
+esp_err_t sla_nvs_str_write(const char *key, char *data);
+
+esp_err_t sla_nvs_int_read(const char *key, int32_t *out_value);
+
+esp_err_t sla_nvs_int_write(const char *key, int32_t value);
 
 #ifdef __cplusplus
 }

@@ -26,22 +26,35 @@
 #include "smartconfig.h"
 #include "mqtt_client.h"
 #include "cJSON.h"
+#include "sla_mqtt_disc.h"
+#include "sla_sy7t609_drv.h"
+#include "sla_web_ota.h"
 
 static const char *TAG = "app_main";
 
-static esp_mqtt_client_handle_t mqtt_client;
-static char mqtt_user_topic[USER_TOPIC_MAX_LEN+1];
-static char mqtt_topic_set[1+USER_TOPIC_MAX_LEN+1+3];
-static char mqtt_topic_get[1+USER_TOPIC_MAX_LEN+1+3];
-static char mqtt_topic_status[1+USER_TOPIC_MAX_LEN+1+6];
+esp_mqtt_client_handle_t mqtt_client;
+static char mqtt_object_id[OBJECT_ID_MAX_LEN+1];
+static char mqtt_topic_set[OBJECT_ID_MAX_LEN+25+1];
+static char mqtt_topic_get[OBJECT_ID_MAX_LEN+25+1];
+static char mqtt_topic_state[OBJECT_ID_MAX_LEN+27+1];
+static char mqtt_topic_availability[65];
+static char mqtt_payload_not_available[17];
+static const char *ha_mqtt_topic_state = "homeassistant/status";
+static const char *ha_mqtt_payload_available = "online";
+static const char *ha_mqtt_payload_not_available = "offline";
+
 static char *socket_main_on_payload  = "{\"socket\":\"main\",\"onoff\":\"on\"}";
 static char *socket_main_off_payload = "{\"socket\":\"main\",\"onoff\":\"off\"}";
 static char *socket_sub_on_payload   = "{\"socket\":\"sub\",\"onoff\":\"on\"}";
 static char *socket_sub_off_payload  = "{\"socket\":\"sub\",\"onoff\":\"off\"}";
+static char *socket_ota_enable_payload       = "{\"ota\":\"Enable\"}";
+static char *socket_ota_disable_payload      = "{\"ota\":\"Disable\"}";
 
 static int is_cloud_connected;
 static int socket_main_sta;
 static int socket_sub_sta;
+static int socket_ota_sta;
+static int socket_ota_sta_last;
 static int led_timer_is_init;
 static int led_timer_is_running;
 static void *led_timer_handle;
@@ -89,7 +102,7 @@ static esp_err_t _sla_sys_evt_cb(sys_type_t sys_type, void *args)
             led_timer_is_init = 1;
             led_timer_handle = xTimerCreate("led timer", 500, 1, 0, _sla_led_timer_handler);
             led_timer_is_running = 1;
-            xTimerStart(led_timer_handle, 0);            
+            xTimerStart(led_timer_handle, 0);
         } else {
 //            if (0 == led_timer_is_running) {
 //                xTimerStart(led_timer_handle, 0);
@@ -112,18 +125,18 @@ static esp_err_t _sla_sys_evt_cb(sys_type_t sys_type, void *args)
     return ESP_OK;
 }
 
-static void _sla_prepare_topic(char *user_topic)
+static void _sla_prepare_topic(char *object_id)
 {
-    size_t input_len = strlen(user_topic);
-    if (input_len > USER_TOPIC_MAX_LEN) {
-        ESP_LOGE(TAG, "user topic exceeds the maximum length of %d bytes", USER_TOPIC_MAX_LEN);
+    size_t input_len = strlen(object_id);
+    if (input_len > OBJECT_ID_MAX_LEN) {
+        ESP_LOGE(TAG, "object id exceeds the maximum length of %d bytes", OBJECT_ID_MAX_LEN);
     }
 
-    sprintf(mqtt_topic_set,    "/%s/set",    user_topic);
-    sprintf(mqtt_topic_get,    "/%s/get",    user_topic);
-    sprintf(mqtt_topic_status, "/%s/status", user_topic);
+    sprintf(mqtt_topic_set,          "homeassistant/switch/%s/set",          object_id);
+    sprintf(mqtt_topic_get,          "homeassistant/switch/%s/get",          object_id);
+    sprintf(mqtt_topic_state,        "homeassistant/switch/%s/state",        object_id);
 
-    ESP_LOGW(TAG, "prepare topic:%s,%s,%s", mqtt_topic_set, mqtt_topic_get, mqtt_topic_status);
+    ESP_LOGW(TAG, "prepare topic:%s,%s,%s", mqtt_topic_set, mqtt_topic_get, mqtt_topic_state);
 }
 
 static char* get_payload(const char *socket_type, int status)
@@ -144,6 +157,14 @@ static char* get_payload(const char *socket_type, int status)
         }
     }
     
+    if (!strcmp(socket_type, "ota")) {
+        if (status) {
+            return socket_ota_enable_payload;
+        } else {
+            return socket_ota_disable_payload;
+        }
+    }
+    
     return "error";    
 }
 
@@ -153,15 +174,24 @@ static void _sla_button_cb(drv_btn_type_t btn_type, uint32_t pin_num)
     ESP_LOGI(TAG, "button[%d] type: %d", pin_num, btn_type);
 
     if (DRV_BUTTON_PRESS_SHORT == btn_type) {
+        if (socket_main_sta) {
+            socket_sub_sta ^= 1;
+            sla_relay_sub_ctrl(socket_sub_sta);
+            sla_led_w_ctrl(socket_sub_sta);
+            if (sla_is_cloud_connected()) {
+                esp_mqtt_client_publish(mqtt_client, mqtt_topic_state, get_payload("sub", socket_sub_sta), 0, 1, 0);
+            }            
+        }
+    } else if (DRV_BUTTON_PRESS_DOUBLE == btn_type) {
         socket_main_sta ^= 1;
         sla_relay_all_ctrl(socket_main_sta);
         socket_sub_sta = socket_main_sta;
         sla_led_w_ctrl(socket_sub_sta);        
         if (sla_is_cloud_connected()) {
-            esp_mqtt_client_publish(mqtt_client, mqtt_topic_status, get_payload("main", socket_main_sta), 0, 1, 0);
+            esp_mqtt_client_publish(mqtt_client, mqtt_topic_state, get_payload("main", socket_main_sta), 0, 1, 0);
             vTaskDelay(10);
-            esp_mqtt_client_publish(mqtt_client, mqtt_topic_status, get_payload("sub", socket_sub_sta), 0, 1, 0);
-        }
+            esp_mqtt_client_publish(mqtt_client, mqtt_topic_state, get_payload("sub", socket_sub_sta), 0, 1, 0);
+        }    
     } else if (DRV_BUTTON_PRESS_HOLD == btn_type) {
         sla_factory_reset();
     } else if (DRV_BUTTON_PRESS_RELEASE == btn_type) {
@@ -179,7 +209,8 @@ static void parse_socket_and_onoff(const char *json_string, char *socket_type, c
 
     const cJSON *socket = cJSON_GetObjectItemCaseSensitive(json, "socket");
     const cJSON *onoff = cJSON_GetObjectItemCaseSensitive(json, "onoff");
-
+    const cJSON *ota = cJSON_GetObjectItemCaseSensitive(json, "ota");
+    
     if (cJSON_IsString(socket) && (socket->valuestring != NULL)) {
 //        ESP_LOGW(TAG, "socket: %s", socket->valuestring);
         strcpy(socket_type, socket->valuestring);
@@ -194,7 +225,42 @@ static void parse_socket_and_onoff(const char *json_string, char *socket_type, c
         ESP_LOGE(TAG, "onoff not found or not a string");
     }
 
+    if (cJSON_IsString(ota) && (ota->valuestring != NULL)) {
+//        ESP_LOGW(TAG, "ota: %s", ota->valuestring);
+        strcpy(socket_type, "ota");
+        strcpy(status, ota->valuestring);
+    } else {
+        ESP_LOGE(TAG, "ota not found or not a string");
+    }        
+
     cJSON_Delete(json);
+}
+
+static esp_err_t _check_ha_state(char *topic, int topic_len, char *data, int data_len)
+{
+    if (!strncmp(topic, ha_mqtt_topic_state, topic_len)) {
+        if (!strncmp(data, ha_mqtt_payload_available, data_len)) {
+            esp_mqtt_client_disconnect(mqtt_client);
+            return ESP_OK;
+        } else if (!strncmp(data, ha_mqtt_payload_not_available, data_len)) {
+            return ESP_OK;
+        }
+    }
+
+    return ESP_FAIL;
+}
+
+static void _sla_web_ota(void)
+{    
+    if (socket_ota_sta_last != socket_ota_sta) {
+        socket_ota_sta_last = socket_ota_sta;
+        sla_ha_mqtt_update_socket_main_config(mqtt_object_id, socket_ota_sta);
+        if (socket_ota_sta) {
+            sla_web_ota_start();
+        } else {
+            sla_web_ota_stop();
+        }
+    }
 }
 
 static void mqtt_data_cb(esp_mqtt_client_handle_t client, char *topic, int topic_len, char *data, int data_len)
@@ -204,6 +270,9 @@ static void mqtt_data_cb(esp_mqtt_client_handle_t client, char *topic, int topic
 
     char socket_type[10] = {0}, status[10] = {0};
     int onoff = 0;
+
+    if (_check_ha_state(topic, topic_len, data, data_len) == ESP_OK)
+        return;
     
     parse_socket_and_onoff(data, socket_type, status);
     ESP_LOGW(TAG, "socket:%s, onoff:%s", socket_type, status);
@@ -219,12 +288,12 @@ static void mqtt_data_cb(esp_mqtt_client_handle_t client, char *topic, int topic
             //main relay ctrl            
 
             socket_main_sta = onoff;        
-            esp_mqtt_client_publish(client, mqtt_topic_status, get_payload("main", socket_main_sta), 0, 1, 0);        
+            esp_mqtt_client_publish(client, mqtt_topic_state, get_payload("main", socket_main_sta), 0, 1, 0);        
             sla_relay_main_ctrl(socket_main_sta);
             
             if (0 == socket_main_sta && 1 == socket_sub_sta) {
                 vTaskDelay(10);
-                esp_mqtt_client_publish(client, mqtt_topic_status, get_payload("sub", 0), 0, 1, 0);
+                esp_mqtt_client_publish(client, mqtt_topic_state, get_payload("sub", 0), 0, 1, 0);
                 socket_sub_sta = 0;
                 sla_relay_sub_ctrl(socket_sub_sta);
                 sla_led_w_ctrl(socket_sub_sta);        
@@ -237,21 +306,35 @@ static void mqtt_data_cb(esp_mqtt_client_handle_t client, char *topic, int topic
             socket_sub_sta = onoff;
 
             if (0 == socket_main_sta) {
-                esp_mqtt_client_publish(client, mqtt_topic_status, get_payload("sub", 0), 0, 1, 0);
+                esp_mqtt_client_publish(client, mqtt_topic_state, get_payload("sub", 0), 0, 1, 0);
                 socket_sub_sta = 0;
             } else {
-                esp_mqtt_client_publish(client, mqtt_topic_status, get_payload("sub", socket_sub_sta), 0, 1, 0);
+                esp_mqtt_client_publish(client, mqtt_topic_state, get_payload("sub", socket_sub_sta), 0, 1, 0);
             }
             sla_relay_sub_ctrl(socket_sub_sta);
             sla_led_w_ctrl(socket_sub_sta);        
         }
+
+        if (0 != socket_type[0] && !strcmp(socket_type, "ota")) {
+            //ota enable/disable
+
+            if (!strcmp(status, "Enable")) {
+                esp_mqtt_client_publish(client, mqtt_topic_state, get_payload("ota", 1), 0, 1, 0);
+                socket_ota_sta = 1;
+                _sla_web_ota();
+            } else if (!strcmp(status, "Disable")) {
+                esp_mqtt_client_publish(client, mqtt_topic_state, get_payload("ota", 0), 0, 1, 0);
+                socket_ota_sta = 0;
+                _sla_web_ota();
+            }          
+        }
     } else if (!strncmp(topic, mqtt_topic_get, topic_len)) {
         if (0 != socket_type[0] && !strcmp(socket_type, "main")) {
-            esp_mqtt_client_publish(client, mqtt_topic_status, get_payload("main", socket_main_sta), 0, 1, 0);
+            esp_mqtt_client_publish(client, mqtt_topic_state, get_payload("main", socket_main_sta), 0, 1, 0);
         }
 
         if (0 != socket_type[0] && !strcmp(socket_type, "sub")) {
-            esp_mqtt_client_publish(client, mqtt_topic_status, get_payload("sub", socket_sub_sta), 0, 1, 0);
+            esp_mqtt_client_publish(client, mqtt_topic_state, get_payload("sub", socket_sub_sta), 0, 1, 0);
         }
     }
 }
@@ -263,15 +346,25 @@ static esp_err_t mqtt_event_handler_cb(esp_mqtt_event_handle_t event)
     // your_context_t *context = event->context;
     switch (event->event_id) {
         case MQTT_EVENT_CONNECTED:
-            ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
+            ESP_LOGW(TAG, "MQTT_EVENT_CONNECTED");
             is_cloud_connected = 1;
             // add system cb
             _sla_sys_evt_cb(SYS_CLOUD_CONNECTED, NULL);
 
-            esp_mqtt_client_publish(client, mqtt_topic_status, get_payload("main", socket_main_sta), 0, 1, 0);
+            sla_ha_mqtt_discovery(mqtt_object_id);
+            
+            esp_mqtt_client_publish(client, mqtt_topic_state, get_payload("main", socket_main_sta), 0, 1, 0);
             vTaskDelay(10);
-            esp_mqtt_client_publish(client, mqtt_topic_status, get_payload("sub", socket_sub_sta), 0, 1, 0);
-                
+            esp_mqtt_client_publish(client, mqtt_topic_state, get_payload("sub", socket_sub_sta), 0, 1, 0);
+            vTaskDelay(10);
+            esp_mqtt_client_publish(client, mqtt_topic_state, get_payload("ota", 0), 0, 1, 0);
+            vTaskDelay(10);
+            
+            sla_ha_device_mqtt_publish_available();
+            
+            msg_id = esp_mqtt_client_subscribe(client, ha_mqtt_topic_state, 0);
+            ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
+            
             msg_id = esp_mqtt_client_subscribe(client, mqtt_topic_set, 0);
             ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
 
@@ -280,7 +373,7 @@ static esp_err_t mqtt_event_handler_cb(esp_mqtt_event_handle_t event)
             
             break;
         case MQTT_EVENT_DISCONNECTED:
-            ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
+            ESP_LOGE(TAG, "MQTT_EVENT_DISCONNECTED");
             is_cloud_connected = 0;
             // add system cb
             _sla_sys_evt_cb(SYS_CLOUD_DISCONNECTED, NULL);            
@@ -319,18 +412,31 @@ static void mqtt_app_start(void)
     char mqtt_username[33] = {0};
     char mqtt_password[33] = {0};
     
-    sla_get_mqtt_broker_params(mqtt_broker_ip, mqtt_user_topic, mqtt_username, mqtt_password);
-    _sla_prepare_topic(mqtt_user_topic);
+    sla_get_mqtt_broker_params(mqtt_broker_ip, mqtt_object_id, mqtt_username, mqtt_password);
+    _sla_prepare_topic(mqtt_object_id);
+    sla_ha_device_mqtt_topic_not_available(mqtt_object_id, mqtt_topic_availability, mqtt_payload_not_available);
     
     esp_mqtt_client_config_t mqtt_cfg = {
         .host = mqtt_broker_ip,
         .username = mqtt_username,
         .password = mqtt_password,
+        .lwt_topic = mqtt_topic_availability,
+        .lwt_msg = mqtt_payload_not_available,
     };
 
     mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
     esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID, mqtt_event_handler, mqtt_client);
     esp_mqtt_client_start(mqtt_client);
+}
+
+void sla_get_sy7t609_info_cb(const char payload[][30], int size)
+{
+    if (sla_is_cloud_connected()) {
+        for (int i = 0; i < size; i++) {
+            esp_mqtt_client_publish(mqtt_client, mqtt_topic_state, payload[i], 0, 1, 0);
+            ESP_LOGI(TAG, "%s", payload[i]);
+        }
+    }
 }
 
 void app_main(void)
@@ -346,6 +452,8 @@ void app_main(void)
     sla_button_init(10000, _sla_button_cb);
 
     sla_sys_evt_cb_reg(_sla_sys_evt_cb);
+    
+    sla_sy7t609_init(sla_get_sy7t609_info_cb);
     
     sla_smartconfig_init();
 

@@ -1,9 +1,25 @@
 ![](./docs/cmpower_w1.png)
+![](./docs/detail.png)
+
+## **固件特点**
+
+### **v2.0.0**
+
+- 支持 **Web OTA** 功能，具体参见**第6节**内容
+- 修复HA默认能源面板中无法添加**能耗**实体
+- 修复无法添加多个插座
+
+### **v1.0.1**
+
+- 足够傻瓜，配网即用，**无需添加/修改任何 yaml 文件**，配网后 HA 中的 mqtt broker 会自动发现设备以及所有实体（包括计量）。
+- 支持计量功能，无需额外校准（电压，电流，功率，电量，频率，温度），基本满足日常使用。
+- 设备离线 HA 自动更新状态显示设备不可用，当设备重新上线后 HA 中自动更新状态显示设备可用（包括 HA 重启）。
+
 # **第一部分**
 
 ## **1. 简介**
 
-不同于 **main** 分支，当前分支主要是为了对接 **Home Assistant** 来控制中移铁通智能插座。
+不同于[主分支版本](https://github.com/Slaven230101/CMPOWER_W1/tree/main)， 当前版本主要是为了对接 **Home Assistant** 来控制中移铁通智能插座。
 
 固件基于乐鑫 **ESP8266_RTOS_SDK** 开发，通信协议采用 **MQTT-TCP** 方式控制插座的两个继电器。其中 **MQTT Broker** 使用 **Home Assistant** 中 **Mosquitto Broker**，从而利用 **Home Assistant** 控制主继电器和子继电器。
 
@@ -19,99 +35,22 @@
 
 ##### **关于自定义数据说明**
 
-由于对接 **Home Assistant**，Broker IP 通过自定义数据方式传给设备。除此之外，为了避免多个插排情况下都订阅相同的主题，用户可以自定义主题的一部分。除此之外，mqtt 用户名和密码也需要传入，因此，自定义数据格式如下:
+由于对接 **Home Assistant，Broker IP** 通过自定义数据方式传给设备。除此之外，为了避免多个插排情况下在 **HA** 中同名，用户可以自定义 **objetc id (具体规范可以参考 HA 官网)**。除此之外，**mqtt 用户名** 和 **密码** 也需要传入，因此，自定义数据格式如下:
 
-`"broker ip":"user string":"mqtt username":"mqtt password"`
 
-使用 `:` 分隔，不能缺省否则 Broker 连接失败:
+`"broker ip":"objetc id":"mqtt username":"mqtt password"`
 
-![](./docs/esptouch.android.jpg)
 
-*图片以 broker ip: 192.168.10.163，自定义 user string: Slaven，username: mqtt，password: homemqtt 为例说明*
+使用 `:` 分隔，不能缺省否则 **Broker** 连接失败:
 
-**由于自定义数据总长度不能超过 32 字节，因此 broker ip 只需填写后两位，前两位默认“192.168”**
+![](./docs/esptouch.android.png)
 
-## **3. HA 中添加 MQTT 实体**
+*图片以 broker ip: 192.168.10.159，自定义 object id: bedroom，username: admin，password: 123456 为例说明*
 
-`configuration.yaml` 文件中添加如下配置:
+由于自定义数据总长度不能超过 32 字节，因此 broker ip 只需填写后两位，前两位默认“192.168”
 
-	mqtt:
-	  switch:
-		- unique_id: main_relay
-		  name: "Main Relay"
-		  state_topic: "/Slaven/status"
-		  command_topic: "/Slaven/set"
-		  value_template: '{{ value_json.socket == "main" and value_json.onoff }}'
-		  payload_on: '{"socket":"main","onoff":"on"}'
-		  payload_off: '{"socket":"main","onoff":"off"}'
-		  state_on: "on"
-		  state_off: "off"
-		  qos: 0
-		  optimistic: false
-		  
-		- unique_id: sub_relay
-		  name: "Chl Relay"
-		  state_topic: "/Slaven/status"
-		  command_topic: "/Slaven/set"
-		  value_template: '{{ value_json.socket == "sub" and value_json.onoff }}'
-		  payload_on: '{"socket":"sub","onoff":"on"}'
-		  payload_off: '{"socket":"sub","onoff":"off"}'
-		  state_on: "on"
-		  state_off: "off"
-		  qos: 0
-		  optimistic: false
 
-![](./docs/mqtt.client.png)
-
-![](./docs/mqtt.client_1.png)
-
-![](./docs/mqtt.client_2.png)
-
-## **4. 订阅主题**
-
-当前 MQTT 订阅的主题有三个，如下：
-
-| Topic                 | 设备端 | HA 端 |
-| --------------------- | --- | ----- |
-| /"user string"/set    | 订阅方 | 发布方   |
-| /"user string"/get    | 订阅方 | 发布方   |
-| /"user string"/status | 发布方 | 订阅方   |
-
-其中 `user string` 由配网时候 EspTouch 自定义数据传入，以刚才上图为例主题则是:
-
-`/Slaven/set`
-
-`/Slaven/get`
-
-`/Slaven/status`
-
-如果你定义为其它 `user string`，则主题根据自定义相应修改
-
-*configuration.yaml 文件也基于此修改对应主题*
-
-## **5. 消息负载**
-
-- 对于 `/"user string"/set` 主题：
-
-| Payload                         | 功能    |
-| ------------------------------- | ----- |
-| {"socket":"main","onoff":"on"}  | 主继电器开 |
-| {"socket":"main","onoff":"off"} | 主继电器关 |
-| {"socket":"sub","onoff":"on"}   | 子继电器开 |
-| {"socket":"sub","onoff":"off"}  | 子继电器关 |
-
-- 对于 `/"user string"/get` 主题：
-
-| Payload           | 功能         |
-| ----------------- | ---------- |
-| {"socket":"main"} | 获取主继电器开关状态 |
-| {"socket":"sub"}  | 获取子继电器开关状态 |
-
-- 对于 `/"user string"/status` 主题：
-
-设备收到 `/"user string"/set` 或 `/"user string"/get` 主题消息后，通过 `/"user string"/status` 主题将设备状态上报给 **Home Assistant**。
-
-## **6. LED说明**
+## **3. LED说明**
 
 | LED    | 状态  | 功能                     |
 | ------ | --- | ---------------------- |
@@ -127,20 +66,61 @@
 
 `蓝色 LED 只在配网环节指示，后续只有红色 LED 指示网络情况`
 
-## **7. 按键说明**
+## **4. 按键说明**
 
-`短按`按键同时`开/关`主/子继电器
+`双击`按键同时`开/关`主/子继电器
 
-## **8. 重置说明**
+`单击`按键`开/关`子继电器（前提是主继电器是开的状态，否则子继电器不会开启。主继电器不开，打开子继电器没意义）
+
+
+## **5. 重置说明**
 
 `长按`按键直至红色 LED 亮起松手则重置设备
 
-## **9. 计划开发**
+## **6. Web OTA**
 
- - MQTT-TLS
- - 计量功能
- - 本地 OTA
- 
+当固件需要更新时可以通过 Web OTA 方式升级。通过设备**配置选项**使能（默认是不使能）
+
+![](./docs/web_ota1.png)
+
+**使能**之后刷新HA网页，点击`访问`即可打开 Web OTA 网页（**不使能**情况下点击`访问`打开的是该项目地址），打开之后如下：
+
+![](./docs/web_ota2.png)
+
+**如果你玩过路由器uboot刷机，那么这个界面你一定不会陌生~~**
+
+页面下方显示的是当前设备端运行的固件版本和发行日期
+
+![](./docs/web_ota3.png)
+
+Web OTA 上传固件以`sysupgrade`结尾，不要上传错固件类型
+
+点击`Upload`后页面如下：
+
+![](./docs/web_ota4.png)
+
+**升级到百分之十左右会卡顿一会属于正常现象。**
+
+当全部上传成功会显示固件size和md5信息，用于比对固件的完整性和可靠性
+
+![](./docs/web_ota5.png)
+
+最后，点击`Update`
+
+![](./docs/web_ota6.png)
+
+直至出现如下界面表示升级成功
+
+![](./docs/web_ota7.png)
+
+`注意：v2.0.0版本仍需通过烧录方式升级，以后版本直接通过Web OTA方式升级！！！`
+`注意：v2.0.0版本仍需通过烧录方式升级，以后版本直接通过Web OTA方式升级！！！`
+`注意：v2.0.0版本仍需通过烧录方式升级，以后版本直接通过Web OTA方式升级！！！`
+
+## **7. 计划开发**
+
+- Telnet（视情况而定）
+
 # 第二部分
 
 ## **1. 如何编译**
@@ -153,9 +133,9 @@
 
 可自行编译或者使用 release 的固件 `xxx_factory.bin`
 
- - 下载[官方工具](https://www.espressif.com/zh-hans/support/download/other-tools)
- - 按图配置烧录
- 
+- 下载[官方工具](https://www.espressif.com/zh-hans/support/download/other-tools)
+- 按图配置烧录
+
 ![](./docs/download_1.png)
 ![](./docs/download_2.png)
 ![](./docs/console.png)

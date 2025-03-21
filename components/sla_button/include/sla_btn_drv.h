@@ -23,6 +23,7 @@ typedef enum {
    DRV_BUTTON_PRESS_SHORT,
    DRV_BUTTON_PRESS_RELEASE,
    DRV_BUTTON_PRESS_HOLD,
+   DRV_BUTTON_PRESS_DOUBLE,
 } drv_btn_type_t;
 
 esp_err_t sla_button_init(uint32_t long_press_ms, void (*btn_cb)(drv_btn_type_t, uint32_t));

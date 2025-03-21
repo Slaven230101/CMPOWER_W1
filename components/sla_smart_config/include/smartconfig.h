@@ -20,7 +20,7 @@ extern "C" {
 #include "esp_err.h"
 
 #define BROKER_IP_MAX_LEN   15
-#define USER_TOPIC_MAX_LEN  32
+#define OBJECT_ID_MAX_LEN   32
 #define USERNAME_MAX_LEN    32
 #define PASSWORD_MAX_LEN    32
 
@@ -36,11 +36,15 @@ typedef enum {
 
 esp_err_t sla_sys_evt_cb_reg(esp_err_t (*fun)(sys_type_t, void*));
 
+esp_err_t sla_wifi_mac_get(uint8_t *mac);
+
 void sla_smartconfig_init(void);
 
 int sla_is_wifi_config(void);
 
 int sla_is_wifi_connected(void);
+
+char* sla_get_sta_ip(void* event_data);
 
 void sla_wifi_reset(void);
 
