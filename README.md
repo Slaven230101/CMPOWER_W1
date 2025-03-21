@@ -114,7 +114,9 @@ Web OTA 上传固件以`sysupgrade`结尾，不要上传错固件类型
 ![](./docs/web_ota7.png)
 
 `注意：v2.0.0版本仍需通过烧录方式升级，以后版本直接通过Web OTA方式升级！！！`
+
 `注意：v2.0.0版本仍需通过烧录方式升级，以后版本直接通过Web OTA方式升级！！！`
+
 `注意：v2.0.0版本仍需通过烧录方式升级，以后版本直接通过Web OTA方式升级！！！`
 
 ## **7. 计划开发**
@@ -137,5 +139,11 @@ Web OTA 上传固件以`sysupgrade`结尾，不要上传错固件类型
 - 按图配置烧录
 
 ![](./docs/download_1.png)
+
 ![](./docs/download_2.png)
+
 ![](./docs/console.png)
+
+<div align=center><img width="258" height="258" src="./docs/qrcode.jpg"/></div>
+
+<p align="center">欢迎关注微信公众号</p>
