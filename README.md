@@ -1,7 +1,13 @@
-![](./docs/cmpower_w1.png)
-![](./docs/detail.png)
+<div align=center><img width="420" src="./docs/cmpower_w1.png"/></div>
+<div align=center><img width="720" src="./docs/detail.jpg"/></div>
 
 ## **固件特点**
+
+### **v3.0.0**
+
+- 配套使用 **中移插座配网 App**，用户不再需要手动填写 EspTouch 自定义数据长串。
+- App 会自动获取手机当前连接的 WiFi SSID，并封装 **Home Assistant MQTT Broker IP、Room Name、MQTT Username、MQTT Password** 后下发给设备。
+- 配网流程更适合普通用户使用，只需要确认手机连接 2.4G WiFi，并按页面提示填写必要参数。
 
 ### **v2.0.0**
 
@@ -25,30 +31,47 @@
 
 ## **2. 配网 APP**
 
-使用 EspTouch，详细介绍可以点击链接:
-[安卓](https://github.com/EspressifApp/EsptouchForAndroid)
-[IOS](https://github.com/EspressifApp/EsptouchForIOS)
+本项目从 **v3.0.0** 开始配套使用 **中移插座配网 App**。该 App 基于乐鑫 **Esptouch V2** 定制，用于给中移铁通智能插座下发 WiFi 信息和 Home Assistant MQTT 参数。
 
-可以通过手机应用市场下载安装。
+> 下载方式：扫描文末微信公众号二维码，关注后回复 **“中移铁通插座”** 即可获取最新固件和 App。
 
-手机连接 WiFi (最好是非混合的2.4G)，打开 APP 后选择 EspTouch V2 方式，输入 WiFi 密码和需要配网的设备数量。
+`使用前请先确认手机已经连接到目标设备所在的 2.4G WiFi。不建议使用 2.4G/5G 混合名称的 WiFi，否则可能导致设备无法完成配网。`
 
-##### **关于自定义数据说明**
+打开 App 后会直接进入配网主界面：
 
-由于对接 **Home Assistant，Broker IP** 通过自定义数据方式传给设备。除此之外，为了避免多个插排情况下在 **HA** 中同名，用户可以自定义 **objetc id (具体规范可以参考 HA 官网)**。除此之外，**mqtt 用户名** 和 **密码** 也需要传入，因此，自定义数据格式如下:
+<div align=center><img width="320" src="./docs/app_cmpower_1.png"/></div>
 
+### **WiFi 配网参数**
 
-`"broker ip":"objetc id":"mqtt username":"mqtt password"`
+App 会自动读取当前手机连接的 WiFi 名称和 BSSID，用户不需要手动填写 WiFi SSID。
 
+用户只需要填写：
 
-使用 `:` 分隔，不能缺省否则 **Broker** 连接失败:
+- **WiFi 密码**
+- **配网数量**（默认 1 台）
 
-![](./docs/esptouch.android.png)
+### **MQTT 配网参数**
 
-*图片以 broker ip: 192.168.10.159，自定义 object id: bedroom，username: admin，password: 123456 为例说明*
+MQTT 参数用于让设备连接 Home Assistant 中的 Mosquitto Broker，并完成后续的自动发现和控制。
 
-由于自定义数据总长度不能超过 32 字节，因此 broker ip 只需填写后两位，前两位默认“192.168”
+用户只需要填写以下内容：
 
+- **Broker IP**：只填写 Home Assistant MQTT Broker IP 的最后一段，前面三段由 App 根据当前手机 IP 自动填充。
+- **Room Name**：房间名或设备标识，用于区分多个插座，避免 Home Assistant 中设备重名。
+- **MQTT Username**：Home Assistant MQTT 用户名。
+- **MQTT Password**：Home Assistant MQTT 密码。
+
+`注意：中移插座配网 App 仅适用于 v3.0.0 及之后版本固件。低于 v3.0.0 的固件仍需使用旧版 Esptouch App 配网，并在自定义数据中手动填写 broker ip:object id:mqtt username:mqtt password。`
+
+旧版方式需要用户在 Esptouch App 的自定义数据中手动输入一整串内容，容易输错且不适合普通用户。新版 **中移插座配网 App** 已将这些内容封装成独立输入项，提交时会自动组装并通过 Esptouch V2 reserved data 下发给设备。
+
+填写完成后点击 **开始配网**，App 会进入配网中页面：
+
+<div align=center><img width="320" src="./docs/app_cmpower_2.jpg"/></div>
+
+配网完成后，App 会显示设备返回的 IP 地址。此时可以回到 Home Assistant 中查看自动发现到的插座设备和实体。
+
+<div align=center><img width="320" src="./docs/app_cmpower_3.jpg"/></div>
 
 ## **3. LED说明**
 
@@ -81,43 +104,39 @@
 
 当固件需要更新时可以通过 Web OTA 方式升级。通过设备**配置选项**使能（默认是不使能）
 
-![](./docs/web_ota1.png)
+<div align=center><img width="680" src="./docs/web_ota1.png"/></div>
 
 **使能**之后刷新HA网页，点击`访问`即可打开 Web OTA 网页（**不使能**情况下点击`访问`打开的是该项目地址），打开之后如下：
 
-![](./docs/web_ota2.png)
+<div align=center><img width="680" src="./docs/web_ota2.png"/></div>
 
 **如果你玩过路由器uboot刷机，那么这个界面你一定不会陌生~~**
 
 页面下方显示的是当前设备端运行的固件版本和发行日期
 
-![](./docs/web_ota3.png)
+<div align=center><img width="680" src="./docs/web_ota3.png"/></div>
 
 Web OTA 上传固件以`sysupgrade`结尾，不要上传错固件类型
 
 点击`Upload`后页面如下：
 
-![](./docs/web_ota4.png)
+<div align=center><img width="680" src="./docs/web_ota4.png"/></div>
 
 **升级到百分之十左右会卡顿一会属于正常现象。**
 
 当全部上传成功会显示固件size和md5信息，用于比对固件的完整性和可靠性
 
-![](./docs/web_ota5.png)
+<div align=center><img width="680" src="./docs/web_ota5.png"/></div>
 
 最后，点击`Update`
 
-![](./docs/web_ota6.png)
+<div align=center><img width="680" src="./docs/web_ota6.png"/></div>
 
 直至出现如下界面表示升级成功
 
-![](./docs/web_ota7.png)
+<div align=center><img width="680" src="./docs/web_ota7.png"/></div>
 
-`注意：v2.0.0版本仍需通过烧录方式升级，以后版本直接通过Web OTA方式升级！！！`
-
-`注意：v2.0.0版本仍需通过烧录方式升级，以后版本直接通过Web OTA方式升级！！！`
-
-`注意：v2.0.0版本仍需通过烧录方式升级，以后版本直接通过Web OTA方式升级！！！`
+`注意：Web OTA 从 v2.0.0 版本开始支持。当前设备固件如果已经是 v2.0.0 或之后版本，后续升级可直接使用 Web OTA；如果设备仍是低于 v2.0.0 的旧版本，则需要先通过烧录方式手动升级。`
 
 ## **7. 计划开发**
 
@@ -138,11 +157,11 @@ Web OTA 上传固件以`sysupgrade`结尾，不要上传错固件类型
 - 下载[官方工具](https://www.espressif.com/zh-hans/support/download/other-tools)
 - 按图配置烧录
 
-![](./docs/download_1.png)
+<div align=center><img width="300" src="./docs/download_1.png"/></div>
 
-![](./docs/download_2.png)
+<div align=center><img width="420" src="./docs/download_2.png"/></div>
 
-![](./docs/console.png)
+<div align=center><img width="680" src="./docs/console.png"/></div>
 
 # 免责声明
 
